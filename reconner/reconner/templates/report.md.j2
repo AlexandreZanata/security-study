@@ -1,0 +1,351 @@
+# 🔍 Reconnaissance Report
+
+**Scan Date:** {{ scan_date }}
+
+---
+
+## 📊 Executive Summary
+
+This report contains the results of an automated security reconnaissance scan performed using the `reconner` tool.
+
+### Key Statistics
+
+| Metric | Count |
+|--------|-------|
+| **Subdomains Discovered** | {{ statistics.subdomains }} |
+| **Live Hosts** | {{ statistics.live_hosts }} |
+| **Technologies Detected** | {{ statistics.technologies }} |
+| **Paths Discovered** | {{ statistics.paths }} |
+| **Total Vulnerabilities** | {{ statistics.vulnerabilities }} |
+| **Critical Findings** | {{ statistics.critical }} |
+| **High Severity Findings** | {{ statistics.high }} |
+| **Medium Severity Findings** | {{ statistics.medium }} |
+
+---
+
+## 🛠️ Tool Versions
+
+The following tools were used in this scan:
+
+{% for tool, info in tool_versions.items() %}
+- **{{ tool }}:** {{ info.version or 'Unknown' }} ({{ info.path }})
+{% endfor %}
+
+---
+
+## 🌐 Discovered Subdomains
+
+{% if subdomains %}
+Total: {{ subdomains|length }} subdomains discovered.
+
+{% for subdomain in subdomains %}
+- `{{ subdomain }}`
+{% endfor %}
+{% else %}
+No subdomains discovered.
+{% endif %}
+
+---
+
+## ✅ Live Hosts
+
+{% if live_hosts %}
+Total: {{ live_hosts|length }} live hosts identified.
+
+{% for host in live_hosts %}
+- {{ host }}
+{% endfor %}
+{% else %}
+No live hosts found.
+{% endif %}
+
+---
+
+## 🔴 Critical Findings
+
+{% set critical_findings = [] %}
+{% for finding in nuclei_results %}
+{% if finding.severity == 'critical' %}
+{% set _ = critical_findings.append(finding) %}
+{% endif %}
+{% endfor %}
+
+{% if critical_findings %}
+**Total Critical Findings:** {{ critical_findings|length }}
+
+{% for finding in critical_findings %}
+### {{ finding.name or 'Unknown Vulnerability' }}
+
+- **URL:** `{{ finding.url }}`
+- **Template ID:** `{{ finding.template_id }}`
+- **Severity:** 🔴 **CRITICAL**
+- **Matched At:** `{{ finding.matched_at }}`
+- **Host:** `{{ finding.host }}`
+
+{% if finding.info %}
+**Details:**
+{% for key, value in finding.info.items() %}
+- **{{ key }}:** {{ value }}
+{% endfor %}
+{% endif %}
+
+**Reproduction Command:**
+```bash
+# Manual verification recommended
+curl -v "{{ finding.url }}"
+```
+
+---
+
+{% endfor %}
+{% else %}
+✅ No critical findings detected.
+{% endif %}
+
+---
+
+## 🟠 High Severity Findings
+
+{% set high_findings = [] %}
+{% for finding in nuclei_results %}
+{% if finding.severity == 'high' %}
+{% set _ = high_findings.append(finding) %}
+{% endif %}
+{% endfor %}
+
+{% if high_findings %}
+**Total High Severity Findings:** {{ high_findings|length }}
+
+{% for finding in high_findings[:20] %}
+### {{ finding.name or 'Unknown Vulnerability' }}
+
+- **URL:** `{{ finding.url }}`
+- **Template ID:** `{{ finding.template_id }}`
+- **Severity:** 🟠 **HIGH**
+- **Matched At:** `{{ finding.matched_at }}`
+
+**Reproduction Command:**
+```bash
+curl -v "{{ finding.url }}"
+```
+
+---
+
+{% endfor %}
+{% if high_findings|length > 20 %}
+*... and {{ high_findings|length - 20 }} more high severity findings. See summary.json for complete list.*
+{% endif %}
+{% else %}
+✅ No high severity findings detected.
+{% endif %}
+
+---
+
+## 🟡 Medium Severity Findings
+
+{% set medium_findings = [] %}
+{% for finding in nuclei_results %}
+{% if finding.severity == 'medium' %}
+{% set _ = medium_findings.append(finding) %}
+{% endif %}
+{% endfor %}
+
+{% if medium_findings %}
+**Total Medium Severity Findings:** {{ medium_findings|length }}
+
+{% for finding in medium_findings[:10] %}
+- **{{ finding.name }}** at `{{ finding.url }}` (Template: `{{ finding.template_id }}`)
+
+{% endfor %}
+{% if medium_findings|length > 10 %}
+*... and {{ medium_findings|length - 10 }} more medium severity findings.*
+{% endif %}
+{% else %}
+✅ No medium severity findings detected.
+{% endif %}
+
+---
+
+## 📁 Interesting Paths Discovered
+
+{% if gobuster_results %}
+**Total Paths Found:** {{ gobuster_results|length }}
+
+The following interesting paths were discovered during directory brute-forcing:
+
+| Path | Status | Size | Target URL |
+|------|--------|------|------------|
+{% for path in gobuster_results[:50] %}
+| `{{ path.path }}` | {{ path.status }} | {{ path.size }} | {{ path.get('target_url', 'N/A') }} |
+{% endfor %}
+
+{% if gobuster_results|length > 50 %}
+*... and {{ gobuster_results|length - 50 }} more paths. See summary.json for complete list.*
+{% endif %}
+
+### Sensitive Paths Identified
+
+{% set sensitive_keywords = ['admin', 'api', 'backup', 'config', 'test', 'dev', 'secret', 'private', 'internal'] %}
+{% set sensitive_paths = [] %}
+{% for path in gobuster_results %}
+{% set path_lower = path.path.lower() %}
+{% set is_sensitive = false %}
+{% for keyword in sensitive_keywords %}
+{% if keyword in path_lower %}
+{% set is_sensitive = true %}
+{% endif %}
+{% endfor %}
+{% if is_sensitive %}
+{% set _ = sensitive_paths.append(path) %}
+{% endif %}
+{% endfor %}
+
+{% if sensitive_paths %}
+⚠️ **Warning:** The following paths may contain sensitive information:
+
+{% for path in sensitive_paths[:20] %}
+- `{{ path.path }}` (Status: {{ path.status }}) on {{ path.get('target_url', 'N/A') }}
+{% endfor %}
+{% endif %}
+
+{% else %}
+No paths discovered during directory enumeration.
+{% endif %}
+
+---
+
+## 🔧 Technologies Detected
+
+{% if technologies %}
+The following technologies were identified on the target systems:
+
+{% for tech in technologies %}
+- **{{ tech }}**
+{% endfor %}
+
+### Technology Details
+
+{% for result in whatweb_results[:20] %}
+#### {{ result.url }}
+
+{% if result.plugins %}
+**Detected Plugins:**
+{% for plugin, data in result.plugins.items() %}
+- **{{ plugin }}:** {{ data }}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+{% else %}
+No specific technologies detected.
+{% endif %}
+
+---
+
+## 📋 HTTP Response Details
+
+{% if httpx_results %}
+### Top Live Hosts with Details
+
+{% for result in httpx_results[:30] %}
+#### {{ result.url }}
+
+- **Status Code:** {{ result.status_code }}
+- **Title:** {{ result.title }}
+- **Content Length:** {{ result.content_length }}
+- **Server:** {{ result.server }}
+{% if result.tech %}
+- **Technologies:** {{ result.tech|join(', ') }}
+{% endif %}
+
+{% endfor %}
+
+{% if httpx_results|length > 30 %}
+*... and {{ httpx_results|length - 30 }} more hosts. See summary.json for complete list.*
+{% endif %}
+
+{% endif %}
+
+---
+
+## ⚠️ Errors and Warnings
+
+{% if errors %}
+The following errors occurred during the scan:
+
+{% for error in errors %}
+- **{{ error.tool }}:** {{ error.error }} ({{ error.timestamp }})
+{% endfor %}
+
+{% else %}
+✅ No errors occurred during the scan.
+{% endif %}
+
+---
+
+## 💡 Recommendations
+
+Based on the findings of this scan, the following recommendations are provided:
+
+1. **Immediate Action Required:**
+   {% if statistics.critical > 0 %}
+   - Review and remediate all **{{ statistics.critical }} critical findings** immediately
+   {% endif %}
+   {% if statistics.high > 0 %}
+   - Address all **{{ statistics.high }} high severity findings** as soon as possible
+   {% endif %}
+
+2. **Security Hardening:**
+   - Review and restrict access to sensitive paths discovered during enumeration
+   - Implement proper access controls and authentication mechanisms
+   - Remove or secure exposed backup files and configuration files
+
+3. **Technology Updates:**
+   - Keep all detected technologies up to date with security patches
+   - Review end-of-life technologies and plan migration
+
+4. **Monitoring:**
+   - Implement continuous security monitoring
+   - Set up alerts for critical vulnerabilities
+   - Regular security assessments
+
+5. **Best Practices:**
+   - Implement proper error handling to avoid information disclosure
+   - Use security headers (HSTS, CSP, etc.)
+   - Regular security audits and penetration testing
+
+---
+
+## 📝 Notes
+
+- This scan was performed using automated tools and may contain false positives
+- Manual verification of all findings is recommended
+- Some findings may require additional context and investigation
+- Results are based on the tools and configurations available at scan time
+
+---
+
+## ⚖️ Legal Notice
+
+**⚠️ IMPORTANT: This scan was performed for authorized security testing purposes only.**
+
+- Only execute against targets you own or have explicit written permission to test
+- Unauthorized scanning is illegal and may result in criminal charges
+- You are responsible for ensuring you have proper authorization before running this tool
+- The authors and contributors of this tool are not responsible for misuse
+
+---
+
+## 📄 Report Metadata
+
+- **Generated by:** reconner
+- **Scan Date:** {{ scan_date }}
+- **Report Format:** Markdown
+- **For detailed JSON data:** See `summary.json`
+- **For quick highlights:** See `highlights.txt`
+
+---
+
+*End of Report*
+
