@@ -8,7 +8,8 @@ from typing import List
 
 from .utils import (
     setup_logging, read_targets_file, normalize_url,
-    ensure_output_dir, get_all_tool_versions, check_tool_exists
+    ensure_output_dir, get_all_tool_versions, check_tool_exists,
+    create_organized_output_dir
 )
 from .runner import ToolRunner
 from .reporter import Reporter
@@ -159,10 +160,15 @@ def main(
     
     # Get targets
     targets: List[str] = []
+    primary_target = None
     if target:
-        targets.append(normalize_url(target))
+        normalized = normalize_url(target)
+        targets.append(normalized)
+        primary_target = normalized.replace('https://', '').replace('http://', '').split('/')[0].split(':')[0]
     elif input_file:
         targets = read_targets_file(input_file)
+        if targets:
+            primary_target = targets[0].replace('https://', '').replace('http://', '').split('/')[0].split(':')[0]
     
     if not targets and not export_only:
         click.echo(click.style('Error: No valid targets found', fg='red'))
@@ -185,8 +191,13 @@ def main(
                     fg='yellow'
                 ))
     
-    # Ensure output directory
-    output_path = ensure_output_dir(output_dir)
+    # Create organized output directory
+    if not export_only and primary_target:
+        output_path = create_organized_output_dir(output_dir, primary_target)
+        if not quiet:
+            click.echo(f'📁 Results will be saved to: {output_path}')
+    else:
+        output_path = ensure_output_dir(output_dir)
     
     # Get tool versions
     tool_versions = get_all_tool_versions()
@@ -267,7 +278,9 @@ def main(
     if not quiet:
         click.echo(click.style('\n📊 Generating reports...', fg='cyan'))
     
-    reporter = Reporter(str(output_path), runner.tool_versions)
+    # Extract primary target domain for reporter
+    target_domain = primary_target if primary_target else "Unknown"
+    reporter = Reporter(str(output_path), runner.tool_versions, target_domain=target_domain)
     reports = reporter.generate_all_reports(results)
     
     # Summary

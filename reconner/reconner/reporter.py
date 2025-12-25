@@ -13,10 +13,11 @@ logger = logging.getLogger(__name__)
 class Reporter:
     """Generates reports from scan results."""
     
-    def __init__(self, output_dir: str, tool_versions: Dict[str, Any]):
+    def __init__(self, output_dir: str, tool_versions: Dict[str, Any], target_domain: Optional[str] = None):
         self.output_dir = Path(output_dir)
         self.tool_versions = tool_versions
         self.summary_data = {}
+        self.target_domain = target_domain or "Unknown"
     
     def generate_summary_json(self, results: Dict[str, Any]) -> Path:
         """Generate unified summary JSON."""
@@ -301,36 +302,285 @@ This scan was performed for authorized security testing purposes only.
         except Exception as e:
             logger.debug(f"pandoc failed: {e}")
         
-        # Fallback to reportlab
+        # Fallback to reportlab with improved formatting
         try:
-            from reportlab.lib.pagesizes import letter
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib.pagesizes import letter, A4
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+            from reportlab.lib import colors
+            from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
             from markdown import markdown
             from html import unescape
+            import re
             
             md_content = markdown_path.read_text()
-            html_content = markdown(md_content)
             
-            # Simple HTML to text conversion
-            import re
-            text_content = re.sub(r'<[^>]+>', '', html_content)
-            text_content = unescape(text_content)
+            # Create document with margins
+            doc = SimpleDocTemplate(
+                str(pdf_path),
+                pagesize=letter,
+                rightMargin=0.75*inch,
+                leftMargin=0.75*inch,
+                topMargin=0.75*inch,
+                bottomMargin=0.75*inch
+            )
             
-            doc = SimpleDocTemplate(str(pdf_path), pagesize=letter)
+            # Define custom styles
             styles = getSampleStyleSheet()
+            
+            # Title style
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=24,
+                textColor=colors.HexColor('#1a1a1a'),
+                spaceAfter=30,
+                alignment=TA_CENTER,
+                fontName='Helvetica-Bold'
+            )
+            
+            # Heading styles
+            h1_style = ParagraphStyle(
+                'CustomH1',
+                parent=styles['Heading1'],
+                fontSize=18,
+                textColor=colors.HexColor('#2c3e50'),
+                spaceAfter=12,
+                spaceBefore=20,
+                fontName='Helvetica-Bold'
+            )
+            
+            h2_style = ParagraphStyle(
+                'CustomH2',
+                parent=styles['Heading2'],
+                fontSize=14,
+                textColor=colors.HexColor('#34495e'),
+                spaceAfter=10,
+                spaceBefore=15,
+                fontName='Helvetica-Bold'
+            )
+            
+            # Normal text style
+            normal_style = ParagraphStyle(
+                'CustomNormal',
+                parent=styles['Normal'],
+                fontSize=10,
+                textColor=colors.HexColor('#2c3e50'),
+                spaceAfter=6,
+                leading=14,
+                alignment=TA_JUSTIFY
+            )
+            
+            # Code style
+            code_style = ParagraphStyle(
+                'CustomCode',
+                parent=styles['Code'],
+                fontSize=9,
+                textColor=colors.HexColor('#27ae60'),
+                fontName='Courier',
+                leftIndent=20,
+                rightIndent=20,
+                spaceAfter=8,
+                backColor=colors.HexColor('#f5f5f5')
+            )
+            
+            # List item style
+            list_style = ParagraphStyle(
+                'CustomList',
+                parent=styles['Normal'],
+                fontSize=10,
+                textColor=colors.HexColor('#2c3e50'),
+                spaceAfter=4,
+                leading=14,
+                leftIndent=20,
+                bulletIndent=10
+            )
+            
+            def clean_html_tags(text):
+                """Remove all HTML tags from text, but preserve content."""
+                if not isinstance(text, str):
+                    text = str(text)
+                # Remove ALL HTML tags completely (including nested tags)
+                # Use a more aggressive regex that handles multi-line tags
+                # First, try to remove tags that span multiple lines
+                text = re.sub(r'<[^>]*>', '', text, flags=re.DOTALL)
+                # Also handle tags that might be split across lines
+                text = re.sub(r'<[^>]*$', '', text, flags=re.MULTILINE)
+                text = re.sub(r'^[^<]*>', '', text, flags=re.MULTILINE)
+                # Decode HTML entities
+                text = text.replace('&amp;', '&')
+                text = text.replace('&lt;', '<')
+                text = text.replace('&gt;', '>')
+                text = text.replace('&quot;', '"')
+                text = text.replace('&apos;', "'")
+                text = text.replace('&nbsp;', ' ')
+                # Remove any remaining HTML-like patterns
+                text = re.sub(r'&[a-zA-Z]+;', '', text)
+                # Clean up extra whitespace
+                text = re.sub(r'\s+', ' ', text)
+                return text.strip()
+            
+            def escape_xml(text):
+                """Escape XML special characters for ReportLab, but preserve ReportLab tags."""
+                if not isinstance(text, str):
+                    text = str(text)
+                # Don't escape ReportLab tags - they need to be processed
+                # Only escape raw < and > that are not part of ReportLab tags
+                # This is a simplified version - ReportLab will handle its own tags
+                return text
+            
             story = []
             
-            for line in text_content.split('\n'):
-                if line.strip():
-                    story.append(Paragraph(line, styles['Normal']))
-                    story.append(Spacer(1, 6))
+            # Parse markdown and create PDF elements
+            lines = md_content.split('\n')
+            i = 0
+            in_code_block = False
+            code_block_lines = []
             
+            while i < len(lines):
+                original_line = lines[i]
+                line = original_line.strip()
+                
+                # Code block handling
+                if line.startswith('```'):
+                    if in_code_block:
+                        # End of code block
+                        if code_block_lines:
+                            # Clean HTML and escape properly for code blocks
+                            cleaned_lines = []
+                            for c in code_block_lines:
+                                cleaned = clean_html_tags(c)
+                                cleaned = cleaned.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                                cleaned_lines.append(cleaned)
+                            code_text = '<br/>'.join(cleaned_lines)
+                            story.append(Paragraph(f"<font face='Courier' size='9' color='#27ae60'>{code_text}</font>", code_style))
+                            story.append(Spacer(1, 8))
+                        code_block_lines = []
+                        in_code_block = False
+                    else:
+                        # Start of code block
+                        in_code_block = True
+                    i += 1
+                    continue
+                
+                if in_code_block:
+                    code_block_lines.append(original_line)
+                    i += 1
+                    continue
+                
+                if not line:
+                    story.append(Spacer(1, 4))
+                    i += 1
+                    continue
+                
+                # Title (first #)
+                if line.startswith('# ') and i < 5:
+                    text = clean_html_tags(line[2:].strip())
+                    # Escape ampersands
+                    text = text.replace('&', '&amp;')
+                    story.append(Paragraph(text, title_style))
+                    story.append(Spacer(1, 20))
+                
+                # H1
+                elif line.startswith('# '):
+                    text = clean_html_tags(line[2:].strip())
+                    text = text.replace('&', '&amp;')
+                    story.append(Spacer(1, 10))
+                    story.append(Paragraph(text, h1_style))
+                    story.append(Spacer(1, 8))
+                
+                # H2
+                elif line.startswith('## '):
+                    text = clean_html_tags(line[3:].strip())
+                    text = text.replace('&', '&amp;')
+                    story.append(Spacer(1, 8))
+                    story.append(Paragraph(text, h2_style))
+                    story.append(Spacer(1, 6))
+                
+                # H3
+                elif line.startswith('### '):
+                    text = clean_html_tags(line[4:].strip())
+                    text = text.replace('&', '&amp;')
+                    story.append(Spacer(1, 6))
+                    story.append(Paragraph(f"<b>{text}</b>", normal_style))
+                    story.append(Spacer(1, 4))
+                
+                # H4
+                elif line.startswith('#### '):
+                    text = clean_html_tags(line[5:].strip())
+                    text = text.replace('&', '&amp;')
+                    story.append(Spacer(1, 4))
+                    story.append(Paragraph(f"<b>{text}</b>", normal_style))
+                    story.append(Spacer(1, 3))
+                
+                # Lists
+                elif line.startswith('- ') or line.startswith('* '):
+                    # Clean HTML FIRST
+                    text = clean_html_tags(line[2:].strip())
+                    # Process markdown formatting AFTER cleaning
+                    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+                    # Handle inline code - use ReportLab font tags
+                    text = re.sub(r'`([^`]+)`', r'<font face="Courier" size="9" color="#27ae60">\1</font>', text)
+                    # Escape ampersands that are not part of entities
+                    text = re.sub(r'&(?![a-zA-Z]+;)', '&amp;', text)
+                    story.append(Paragraph(f"• {text}", list_style))
+                    story.append(Spacer(1, 2))
+                
+                # Numbered lists
+                elif re.match(r'^\d+\.\s', line):
+                    # Clean HTML FIRST
+                    text = clean_html_tags(re.sub(r'^\d+\.\s', '', line))
+                    # Process markdown formatting AFTER cleaning
+                    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+                    text = re.sub(r'`([^`]+)`', r'<font face="Courier" size="9" color="#27ae60">\1</font>', text)
+                    # Escape ampersands that are not part of entities
+                    text = re.sub(r'&(?![a-zA-Z]+;)', '&amp;', text)
+                    story.append(Paragraph(f"• {text}", list_style))
+                    story.append(Spacer(1, 2))
+                
+                # Tables - skip
+                elif '|' in line and i > 0 and '|' in lines[i-1].strip():
+                    i += 1
+                    continue
+                
+                # Horizontal rule
+                elif line.startswith('---') or line.startswith('==='):
+                    story.append(Spacer(1, 10))
+                    story.append(Paragraph("_" * 70, normal_style))
+                    story.append(Spacer(1, 10))
+                
+                # Regular text
+                else:
+                    # Clean HTML tags FIRST - remove ALL existing HTML
+                    clean_line = clean_html_tags(line)
+                    
+                    # Process markdown formatting AFTER cleaning HTML
+                    # Bold
+                    clean_line = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', clean_line)
+                    # Italic
+                    clean_line = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', clean_line)
+                    # Inline code - use ReportLab font tags
+                    clean_line = re.sub(r'`([^`]+)`', r'<font face="Courier" size="9" color="#27ae60">\1</font>', clean_line)
+                    
+                    # Escape ampersands that are not part of HTML entities or ReportLab tags
+                    # But preserve ReportLab tags (<b>, <i>, <font>)
+                    clean_line = re.sub(r'&(?![a-zA-Z]+;|lt;|gt;|amp;|quot;|apos;)', '&amp;', clean_line)
+                    
+                    if clean_line.strip():
+                        story.append(Paragraph(clean_line, normal_style))
+                        story.append(Spacer(1, 3))
+                
+                i += 1
+            
+            # Build PDF
             doc.build(story)
             logger.info(f"Generated report.pdf using reportlab at {pdf_path}")
             return pdf_path
         except Exception as e:
             logger.error(f"Failed to generate PDF: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
     
     def generate_all_reports(self, results: Dict[str, Any]) -> Dict[str, Path]:

@@ -133,6 +133,33 @@ def get_timestamp() -> str:
     return datetime.now().strftime('%Y%m%d-%H%M%S')
 
 
+def create_organized_output_dir(base_dir: str, target: str) -> Path:
+    """Create organized output directory with domain name and timestamp.
+    
+    Format: base_dir/domain.com - DD_MM_YYYY - HH:MMAM
+    Example: results/vipcommerce.com.br - 25_12_2025 - 7:22PM
+    """
+    from datetime import datetime
+    
+    # Extract domain from target (remove http://, https://, paths)
+    domain = target.replace('https://', '').replace('http://', '').split('/')[0].split(':')[0]
+    
+    # Get current date and time
+    now = datetime.now()
+    date_str = now.strftime('%d_%m_%Y')
+    time_str = now.strftime('%I:%M%p').lower().replace(':', '_')
+    
+    # Create directory name
+    dir_name = f"{domain} - {date_str} - {time_str}"
+    
+    # Create full path
+    output_path = Path(base_dir) / dir_name
+    output_path.mkdir(parents=True, exist_ok=True)
+    (output_path / 'raw').mkdir(exist_ok=True)
+    
+    return output_path
+
+
 def normalize_url(url: str) -> str:
     """Normalize URL by adding protocol if missing."""
     url = url.strip()
